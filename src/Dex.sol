@@ -5,7 +5,6 @@ import "openzeppelin-contracts/utils/math/Math.sol";
 import "forge-std/console.sol";
 
 contract Dex is ERC20{
-    event Console(uint amount);
     IERC20 tokenX_;
     IERC20 tokenY_;
 
@@ -20,42 +19,38 @@ contract Dex is ERC20{
     /** swap -> token 교환
     - swap할 금액 제공
     - 유동성 확인
-    - 
+    - fee계산: https://dev.to/learnweb3/build-your-own-decentralized-exchange-use-the-xyk-amm-curve-on-ethereum-using-solidity-ethersjs-nextjs-and-web3modal-3ncn
      */
-    function swap(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _tokenMinimumOutputAmount) public returns (uint256){
+    function swap(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _tokenMinimumOutputAmount) external returns (uint256){
         require((_tokenXAmount==0) && (_tokenYAmount >0) || (_tokenYAmount==0)&&(_tokenXAmount>0),"INSUFFICIENT_AMOUNT");
+        
         require(reserveX_ >0 && reserveY_ >0, "fail");
 
-        (reserveX_, reserveY_) = _update();
+        uint256 reserveX;
+        uint256 reserveY;
+        (reserveX, reserveY) = _update();
         
         uint256 inputWithFees;
         uint256 outputAmount;
 
         if(_tokenXAmount > 0){
             inputWithFees = _tokenXAmount * 999 / 1000;
-            outputAmount = (reserveY_ * inputWithFees)/(reserveX_ + inputWithFees);
+            outputAmount = (reserveY * inputWithFees)/(reserveX + inputWithFees);
             require(outputAmount >= _tokenMinimumOutputAmount, "INSUFICIENT_OUTPUT_AMOUNT");
-            console.log(inputWithFees);
-            console.log(reserveX_);
-            console.log(reserveY_);
-            reserveX_ += _tokenXAmount;
-            reserveY_ -= outputAmount;
             
             tokenX_.transferFrom(msg.sender, address(this), _tokenXAmount);
             tokenY_.transfer(msg.sender, outputAmount);
         }
         else{
             inputWithFees = _tokenYAmount * 999 /1000;
-            outputAmount = (reserveX_ * inputWithFees) / (reserveY_ + inputWithFees);
+            outputAmount = (reserveX * inputWithFees) / (reserveY + inputWithFees);
             require(outputAmount >= _tokenMinimumOutputAmount, "INSUFICIENT_OUTPUT_AMOUNT");
-            
-            reserveX_ -= outputAmount;
-            reserveY_ += _tokenXAmount;
 
             tokenY_.transferFrom(msg.sender, address(this), _tokenYAmount);
             tokenX_.transfer(msg.sender, outputAmount);
-
         }
+
+        (reserveX_,reserveY_) = _update();
         return outputAmount;
 
     }
@@ -84,33 +79,28 @@ contract Dex is ERC20{
      */
 
     function addLiquidity(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _minimumLPTokenAmount) external returns (uint256 LPTokenAmount){
+        require(_tokenXAmount >0 &&  _tokenYAmount >0, "INSUFFICIENT_AMOUNT");
+
         uint256 reserveX;
         uint256 reserveY;
         uint256 tokenXAmountOptimal;
         uint256 tokenYAmountOptimal;
         uint256 amountX;
         uint256 amountY;
-        require(_tokenXAmount >0, "INSUFFICIENT_X_AMOUNT");
-        require(_tokenYAmount >0, "INSUFFICIENT_Y_AMOUNT");
-        
-        (reserveX, reserveY) = _update();
-        
 
-        // tokenX_.approve(address(this), _tokenXAmount);
-        // tokenY_.approve(address(this), _tokenYAmount);
-        
+        (reserveX,reserveY) = _update(); //pool reserve update
 
         /**
         quote - pool에 넣고 싶은 x토큰 양 넣으면 동일한 가치의 y토큰을 반환해주는 함수
         1. pool이 비어있을 때
         2. pool이 비어있지 않을 때
             2-1. x, y 모두 정확한 비율로 들어옴 -> 2,3
-            2-2. x는 정확한 비율로 들어오고, y는 잘못 들어옴
-            2-3. x는 잘못 들어오고, y는 정확한 비율로 들어옴
+            2-2. x는 정확한 비율로 들어오고, y는 잘못 들어옴(많이 들어오면 비율만큼만, 적으면 revert)
+            2-3. x는 잘못 들어오고, y는 정확한 비율로 들어옴(많이 들어오면 비율만큼만, 적으면 revert)
             2-4. x, y 모두 잘못 들어옴 -> revert
          */
 
-        if(reserveX == 0 && reserveY == 0){ //1
+        if(totalSupply() == 0){ //1
             (amountX, amountY) = (_tokenXAmount, _tokenYAmount);
         }
         else{ //2
@@ -125,14 +115,14 @@ contract Dex is ERC20{
                 (amountX,amountY) = (tokenXAmountOptimal, _tokenYAmount);
             }
         }
+
         tokenX_.transferFrom(msg.sender, address(this), amountX);
         tokenY_.transferFrom(msg.sender, address(this), amountY);
         
         LPTokenAmount = mint(msg.sender,amountX,amountY); 
         require(LPTokenAmount>=_minimumLPTokenAmount);
 
-        (reserveX_,reserveY_) = _update(); //pool reserve update
-
+        (reserveX_,reserveY_) = _update();
         return LPTokenAmount;
     }
 
@@ -146,6 +136,9 @@ contract Dex is ERC20{
     3. reserve amount update
      */
     function removeLiquidity(uint256 _LPTokenAmount, uint256 _minimumTokenXAmount, uint256 _minimumTokenYAmount) external returns(uint256, uint256){
+        require(_LPTokenAmount > 0, "INSUFFICIENT_AMOUNT");
+        require(balanceOf(msg.sender) >= _LPTokenAmount, "INSUFFICIENT_LPtoken_AMOUNT");
+        
         uint256 reserveX;
         uint256 reserveY;
         uint256 amountX;
@@ -153,8 +146,8 @@ contract Dex is ERC20{
 
         (reserveX, reserveY) = _update();
 
-        amountX = _LPTokenAmount * reserveX / totalSupply();
-        amountY = _LPTokenAmount * reserveY / totalSupply();
+        amountX =  reserveX * _LPTokenAmount/ totalSupply();
+        amountY = reserveY * _LPTokenAmount / totalSupply();
         require(amountX >_minimumTokenXAmount && amountY>_minimumTokenYAmount, "INSUFFICIENT_LIQUIDITY_BURNED");
         
         tokenX_.transfer(msg.sender, amountX);
@@ -162,6 +155,7 @@ contract Dex is ERC20{
 
         _burn(msg.sender, _LPTokenAmount);
 
+        (reserveX_,reserveY_) = _update();
         return (amountX, amountY);
     }
     function transfer(address _to, uint256 _lpAmount) public override returns (bool){
@@ -170,27 +164,25 @@ contract Dex is ERC20{
     }
 
     // 들어오는 값이 비율이 맞는지 확인하고 작거나 같은 값을 반환
-    function _quote(uint256 _inputAmountA, uint256 _reserveA, uint256 _reserveB) private returns(uint256){
-        require(_reserveA > 0, "_reserveA and _reserveB are over than 0");
-        require( _reserveB >0);
+    function _quote(uint256 _inputAmountA, uint256 _reserveA, uint256 _reserveB) internal pure returns(uint256){
+        require(_reserveA > 0 && _reserveB>0, "_reserveA and _reserveB are over than 0");
         return (_inputAmountA*_reserveB)/_reserveA;
     }
 
-    function mint(address _to, uint256 _amountX, uint256 _amountY) private returns(uint256){
+    function mint(address _to, uint256 _amountX, uint256 _amountY) internal returns(uint256){
         uint256 lpTotalAmount = totalSupply();
         uint256 lpValue;
         if(lpTotalAmount == 0){ //초기 상태
-            //lpValue = Math.sqrt(_amountX * _amountY); //amount에 대한 LP token 제공
-            lpValue = _amountX * _amountY / 10**18;
+            lpValue = Math.sqrt(_amountX * _amountY); //amount에 대한 LP token 제공
         }
         else{ 
-            lpValue = Math.min(_amountX * lpTotalAmount / reserveX_, _amountY * lpTotalAmount / reserveY_); 
+            lpValue = Math.min(lpTotalAmount * _amountX / reserveX_, lpTotalAmount * _amountY/ reserveY_); 
         }
         _mint(_to,lpValue);
         return lpValue;
     }
 
-    function _update() private returns(uint256, uint256){
+    function _update() internal view returns(uint256, uint256){
         uint256 amountX = tokenX_.balanceOf(address(this));
         uint256 amountY = tokenY_.balanceOf(address(this));
 
