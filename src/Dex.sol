@@ -4,7 +4,7 @@ import "openzeppelin-contracts/token/ERC20/ERC20.sol";
 import "openzeppelin-contracts/utils/math/Math.sol";
 import "forge-std/console.sol";
 
-contract Dex is ERC20{
+contract Dex is ERC20{  
     IERC20 tokenX_;
     IERC20 tokenY_;
 
@@ -35,7 +35,7 @@ contract Dex is ERC20{
 
         if(_tokenXAmount > 0){
             inputWithFees = _tokenXAmount * 999 / 1000;
-            outputAmount = (reserveY * inputWithFees)/(reserveX + inputWithFees);
+            outputAmount =  (reserveY * inputWithFees)/(reserveX + inputWithFees);
             require(outputAmount >= _tokenMinimumOutputAmount, "INSUFICIENT_OUTPUT_AMOUNT");
             
             tokenX_.transferFrom(msg.sender, address(this), _tokenXAmount);
