@@ -2,22 +2,61 @@
 pragma solidity ^0.8.13;
 import "openzeppelin-contracts/token/ERC20/ERC20.sol";
 import "openzeppelin-contracts/utils/math/Math.sol";
+import "forge-std/console.sol";
 
 contract Dex is ERC20{
     event Console(uint amount);
-
     IERC20 tokenX_;
     IERC20 tokenY_;
 
     uint256 reserveX_; //tokenX_ amount
     uint256 reserveY_; //tokenY_ amount
 
-
     constructor(address _tokenX, address _tokenY) ERC20("LPToken","LP"){
         tokenX_ = IERC20(_tokenX);
         tokenY_ = IERC20(_tokenY);
     }
-    function swap(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _tokenMinimumOutputAmount) external returns (uint256 outputAmount){
+
+    /** swap -> token 교환
+    - swap할 금액 제공
+    - 유동성 확인
+    - 
+     */
+    function swap(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _tokenMinimumOutputAmount) public returns (uint256){
+        require((_tokenXAmount==0) && (_tokenYAmount >0) || (_tokenYAmount==0)&&(_tokenXAmount>0),"INSUFFICIENT_AMOUNT");
+        require(reserveX_ >0 && reserveY_ >0, "fail");
+
+        (reserveX_, reserveY_) = _update();
+        
+        uint256 inputWithFees;
+        uint256 outputAmount;
+
+        if(_tokenXAmount > 0){
+            inputWithFees = _tokenXAmount * 999 / 1000;
+            outputAmount = (reserveY_ * inputWithFees)/(reserveX_ + inputWithFees);
+            require(outputAmount >= _tokenMinimumOutputAmount, "INSUFICIENT_OUTPUT_AMOUNT");
+            console.log(inputWithFees);
+            console.log(reserveX_);
+            console.log(reserveY_);
+            reserveX_ += _tokenXAmount;
+            reserveY_ -= outputAmount;
+            
+            tokenX_.transferFrom(msg.sender, address(this), _tokenXAmount);
+            tokenY_.transfer(msg.sender, outputAmount);
+        }
+        else{
+            inputWithFees = _tokenYAmount * 999 /1000;
+            outputAmount = (reserveX_ * inputWithFees) / (reserveY_ + inputWithFees);
+            require(outputAmount >= _tokenMinimumOutputAmount, "INSUFICIENT_OUTPUT_AMOUNT");
+            
+            reserveX_ -= outputAmount;
+            reserveY_ += _tokenXAmount;
+
+            tokenY_.transferFrom(msg.sender, address(this), _tokenYAmount);
+            tokenX_.transfer(msg.sender, outputAmount);
+
+        }
+        return outputAmount;
 
     }
 
@@ -132,15 +171,17 @@ contract Dex is ERC20{
 
     // 들어오는 값이 비율이 맞는지 확인하고 작거나 같은 값을 반환
     function _quote(uint256 _inputAmountA, uint256 _reserveA, uint256 _reserveB) private returns(uint256){
-        require(_reserveA > 0&& _reserveB >0, "_reserveA and _reserveB are over than 0");
-        return (_inputAmountA*_reserveA)/_reserveB;
+        require(_reserveA > 0, "_reserveA and _reserveB are over than 0");
+        require( _reserveB >0);
+        return (_inputAmountA*_reserveB)/_reserveA;
     }
 
     function mint(address _to, uint256 _amountX, uint256 _amountY) private returns(uint256){
         uint256 lpTotalAmount = totalSupply();
         uint256 lpValue;
         if(lpTotalAmount == 0){ //초기 상태
-            lpValue = Math.sqrt(_amountX * _amountY); //amount에 대한 LP token 제공
+            //lpValue = Math.sqrt(_amountX * _amountY); //amount에 대한 LP token 제공
+            lpValue = _amountX * _amountY / 10**18;
         }
         else{ 
             lpValue = Math.min(_amountX * lpTotalAmount / reserveX_, _amountY * lpTotalAmount / reserveY_); 
