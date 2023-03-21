@@ -11,13 +11,11 @@ contract Dex is ERC20{
 
     uint256 reserveX_; //tokenX_ amount
     uint256 reserveY_; //tokenY_ amount
-    uint256 totalLiquidity;
 
 
     constructor(address _tokenX, address _tokenY) ERC20("LPToken","LP"){
         tokenX_ = IERC20(_tokenX);
         tokenY_ = IERC20(_tokenY);
-        totalLiquidity = 0;
     }
     function swap(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _tokenMinimumOutputAmount) external returns (uint256 outputAmount){
 
@@ -47,14 +45,17 @@ contract Dex is ERC20{
      */
 
     function addLiquidity(uint256 _tokenXAmount, uint256 _tokenYAmount, uint256 _minimumLPTokenAmount) external returns (uint256 LPTokenAmount){
-        uint256 reserveX = reserveX_;
-        uint256 reserveY = reserveY_;
+        uint256 reserveX;
+        uint256 reserveY;
         uint256 tokenXAmountOptimal;
         uint256 tokenYAmountOptimal;
         uint256 amountX;
         uint256 amountY;
         require(_tokenXAmount >0, "INSUFFICIENT_X_AMOUNT");
         require(_tokenYAmount >0, "INSUFFICIENT_Y_AMOUNT");
+        
+        (reserveX, reserveY) = _update();
+        
 
         // tokenX_.approve(address(this), _tokenXAmount);
         // tokenY_.approve(address(this), _tokenYAmount);
@@ -90,17 +91,42 @@ contract Dex is ERC20{
         
         LPTokenAmount = mint(msg.sender,amountX,amountY); 
         require(LPTokenAmount>=_minimumLPTokenAmount);
-        totalLiquidity += LPTokenAmount; //pool의 total liquidity 추가
 
-        (reserveX_,reserveY_) = (amountX,amountY); //pool reserve update
+        (reserveX_,reserveY_) = _update(); //pool reserve update
 
         return LPTokenAmount;
     }
 
+    /** removeLiquidity
+    - 유동성을 제거하는 함수
+    - burn 함수로 liquidity 제거
+    
+    1. LP 토큰을 원래 토큰과 교환하여 burn할 LP 토큰 허용량 제공(parmeter)
+    2. burn할 토큰 비율과 LP 토큰의 비율을 계산해서 해당 비율만큼의 토큰들을 사용자에게 보냄
+        amount = LP token amount * reserve token / totalsupply
+    3. reserve amount update
+     */
     function removeLiquidity(uint256 _LPTokenAmount, uint256 _minimumTokenXAmount, uint256 _minimumTokenYAmount) external returns(uint256, uint256){
-        return (1, 2);
+        uint256 reserveX;
+        uint256 reserveY;
+        uint256 amountX;
+        uint256 amountY;
+
+        (reserveX, reserveY) = _update();
+
+        amountX = _LPTokenAmount * reserveX / totalSupply();
+        amountY = _LPTokenAmount * reserveY / totalSupply();
+        require(amountX >_minimumTokenXAmount && amountY>_minimumTokenYAmount, "INSUFFICIENT_LIQUIDITY_BURNED");
+        
+        tokenX_.transfer(msg.sender, amountX);
+        tokenY_.transfer(msg.sender, amountY);
+
+        _burn(msg.sender, _LPTokenAmount);
+
+        return (amountX, amountY);
     }
     function transfer(address _to, uint256 _lpAmount) public override returns (bool){
+        _transfer(msg.sender, _to, _lpAmount);
         return true;
     }
 
@@ -121,5 +147,12 @@ contract Dex is ERC20{
         }
         _mint(_to,lpValue);
         return lpValue;
+    }
+
+    function _update() private returns(uint256, uint256){
+        uint256 amountX = tokenX_.balanceOf(address(this));
+        uint256 amountY = tokenY_.balanceOf(address(this));
+
+        return (amountX, amountY);
     }
 }
